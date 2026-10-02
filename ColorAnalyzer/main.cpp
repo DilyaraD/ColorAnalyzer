@@ -38,16 +38,6 @@ void copyToClipboard(const string& text) {
 // БАЗОВЫЕ ФУНКЦИИ
 // ============================================================
 
-Mat toGray(const Mat& src) {
-    Mat gray(src.rows, src.cols, CV_8UC1);
-    for (int i = 0; i < src.rows; i++)
-        for (int j = 0; j < src.cols; j++) {
-            Vec3b p = src.at<Vec3b>(i, j);
-            gray.at<uchar>(i, j) = (uchar)(0.299 * p[2] + 0.587 * p[1] + 0.114 * p[0]);
-        }
-    return gray;
-}
-
 double getHue(Vec3b p) {
     double b = p[0] / 255.0, g = p[1] / 255.0, r = p[2] / 255.0;
     double maxV = max(max(r, g), b);
@@ -81,80 +71,6 @@ Mat getHueMap(const Mat& src) {
         for (int j = 0; j < src.cols; j++)
             result.at<uchar>(i, j) = (uchar)(getHue(src.at<Vec3b>(i, j)) / 360.0 * 255);
     return result;
-}
-
-Mat getColorMap(const Mat& src) {
-    Mat result(src.rows, src.cols, CV_8UC3);
-    for (int i = 0; i < src.rows; i++)
-        for (int j = 0; j < src.cols; j++) {
-            double h = getHue(src.at<Vec3b>(i, j));
-            Vec3b color;
-            if (h < 30 || h >= 330) color = Vec3b(0, 0, 255);
-            else if (h < 60) color = Vec3b(0, 165, 255);
-            else if (h < 90) color = Vec3b(0, 255, 255);
-            else if (h < 150) color = Vec3b(0, 255, 0);
-            else if (h < 210) color = Vec3b(255, 255, 0);
-            else if (h < 270) color = Vec3b(255, 0, 0);
-            else color = Vec3b(255, 0, 255);
-            result.at<Vec3b>(i, j) = color;
-        }
-    return result;
-}
-
-// ============================================================
-// РЕДАКТИРОВАНИЕ
-// ============================================================
-
-Mat adjustBrightness(const Mat& src, int delta) {
-    Mat r = src.clone();
-    for (int i = 0; i < r.rows; i++)
-        for (int j = 0; j < r.cols; j++) {
-            Vec3b p = r.at<Vec3b>(i, j);
-            p[0] = saturate_cast<uchar>(p[0] + delta);
-            p[1] = saturate_cast<uchar>(p[1] + delta);
-            p[2] = saturate_cast<uchar>(p[2] + delta);
-            r.at<Vec3b>(i, j) = p;
-        }
-    return r;
-}
-
-Mat adjustSaturation(const Mat& src, double k) {
-    Mat r = src.clone();
-    for (int i = 0; i < r.rows; i++)
-        for (int j = 0; j < r.cols; j++) {
-            Vec3b p = r.at<Vec3b>(i, j);
-            double gray = 0.299 * p[2] + 0.587 * p[1] + 0.114 * p[0];
-            for (int c = 0; c < 3; c++)
-                p[c] = saturate_cast<uchar>(gray + k * (p[c] - gray));
-            r.at<Vec3b>(i, j) = p;
-        }
-    return r;
-}
-
-Mat adjustContrast(const Mat& src, double k) {
-    Mat r = src.clone();
-    for (int i = 0; i < r.rows; i++)
-        for (int j = 0; j < r.cols; j++) {
-            Vec3b p = r.at<Vec3b>(i, j);
-            for (int c = 0; c < 3; c++)
-                p[c] = saturate_cast<uchar>((p[c] - 128) * k + 128);
-            r.at<Vec3b>(i, j) = p;
-        }
-    return r;
-}
-
-Mat adjustGamma(const Mat& src, double gamma) {
-    Mat r = src.clone();
-    uchar lut[256];
-    for (int i = 0; i < 256; i++)
-        lut[i] = saturate_cast<uchar>(255.0 * pow(i / 255.0, 1.0 / gamma));
-    for (int i = 0; i < r.rows; i++)
-        for (int j = 0; j < r.cols; j++) {
-            Vec3b p = r.at<Vec3b>(i, j);
-            p[0] = lut[p[0]]; p[1] = lut[p[1]]; p[2] = lut[p[2]];
-            r.at<Vec3b>(i, j) = p;
-        }
-    return r;
 }
 
 // ============================================================
@@ -283,25 +199,64 @@ vector<ColorInfo> getDominantColors(const Mat& src, int N) {
 }
 
 // ============================================================
+// ГИСТОГРАММЫ
+// ============================================================
+
+void buildHistograms(const Mat& src, int histB[256], int histG[256], int histR[256]) {
+    for (int i = 0; i < 256; i++) { histB[i] = 0; histG[i] = 0; histR[i] = 0; }
+
+    for (int i = 0; i < src.rows; i++)
+        for (int j = 0; j < src.cols; j++) {
+            Vec3b p = src.at<Vec3b>(i, j);
+            histB[p[0]]++;
+            histG[p[1]]++;
+            histR[p[2]]++;
+        }
+}
+
+Mat drawHistogram(int hist[256], Scalar color, int width, int height) {
+    Mat img(height, width, CV_8UC3, Scalar(20, 20, 20));
+
+    int maxVal = 0;
+    for (int i = 0; i < 256; i++)
+        if (hist[i] > maxVal) maxVal = hist[i];
+    if (maxVal == 0) maxVal = 1;
+
+    int binW = width / 256;
+    if (binW < 1) binW = 1;
+
+    for (int i = 0; i < 256; i++) {
+        int h = (int)((double)hist[i] / maxVal * (height - 8));
+        for (int x = i * binW; x < (i + 1) * binW && x < width; x++) {
+            for (int y = height - 1; y > height - 1 - h && y >= 0; y--) {
+                img.at<Vec3b>(y, x) = Vec3b(color[0], color[1], color[2]);
+            }
+        }
+    }
+
+    cv::putText(img, "0", Point(2, height - 2), FONT_HERSHEY_SIMPLEX, 0.3, Scalar(150, 150, 150), 1);
+    cv::putText(img, "255", Point(width - 25, height - 2), FONT_HERSHEY_SIMPLEX, 0.3, Scalar(150, 150, 150), 1);
+
+    return img;
+}
+
+// ============================================================
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 // ============================================================
 
-int brightness = 100;
-int saturation = 100;
-int contrast = 100;
-int gammaVal = 100;
 int targetHue = 0;
 int newHue = 180;
 int mode = 0;
 
 bool applyReplace = false;
 bool applyBalance = false;
-bool splitView = false;        // режим "До/После"
+bool splitView = false;
 
 Mat src;
 Mat cachedDisplay;
 vector<ColorInfo> cachedColors;
 bool needRecalc = true;
+bool histNeedRecalc = true;
 
 // ============================================================
 // ПРИМЕНЕНИЕ
@@ -309,10 +264,6 @@ bool needRecalc = true;
 
 Mat applyAll(const Mat& input) {
     Mat r = input.clone();
-    r = adjustBrightness(r, brightness - 100);
-    r = adjustSaturation(r, saturation / 100.0);
-    r = adjustContrast(r, contrast / 100.0);
-    r = adjustGamma(r, gammaVal / 100.0);
     if (applyBalance) r = balanceColors(r);
     if (applyReplace) r = replaceColor(r, targetHue, newHue);
     return r;
@@ -322,17 +273,19 @@ Mat getModeImage() {
     Mat e = applyAll(src);
     switch (mode) {
     case 0: return e;
-    case 1: return toGray(e);
-    case 2: return getSaturation(e);
-    case 3: return getHueMap(e);
-    case 4: return getColorMap(e);
+    case 1: return getSaturation(e);
+    case 2: return getHueMap(e);
     default: return e;
     }
 }
 
 void updateCache() {
     cachedDisplay = getModeImage();
+    if (cachedDisplay.channels() == 1) {
+        cvtColor(cachedDisplay, cachedDisplay, COLOR_GRAY2BGR);
+    }
     needRecalc = false;
+    histNeedRecalc = true;   // ← гистограмма пересчитается вместе с результатом
 }
 
 unsigned int bgr2hex(Vec3b c) {
@@ -340,7 +293,7 @@ unsigned int bgr2hex(Vec3b c) {
 }
 
 // ============================================================
-// ВЫБОР ФАЙЛА (открытие / сохранение)
+// ВЫБОР ФАЙЛА
 // ============================================================
 
 string openFileDialog() {
@@ -396,7 +349,6 @@ int main(int argc, char* argv[]) {
 
     cachedColors = getDominantColors(src, 6);
     cout << "Loaded: " << src.cols << "x" << src.rows << endl;
-    cout << "Colors cached: " << cachedColors.size() << endl;
 
     updateCache();
 
@@ -416,7 +368,7 @@ int main(int argc, char* argv[]) {
     while (true) {
         int panelX = IMG_X + imgW + 20;
         int canvasW = panelX + PANEL_W + 10;
-        int canvasH = max(imgH + IMG_Y + 20, 900);
+        int canvasH = max(imgH + IMG_Y + 20, 1000);
 
         Mat canvas(canvasH, canvasW, CV_8UC3, Scalar(35, 35, 35));
 
@@ -424,10 +376,8 @@ int main(int argc, char* argv[]) {
 
         // ============ ИЗОБРАЖЕНИЕ ============
         if (splitView) {
-            // Режим "До/После"
             int halfW = imgW / 2;
 
-            // Левая половина — оригинал
             Mat origView = src.clone();
             if (origView.cols != halfW || origView.rows != imgH) {
                 resize(origView, origView, Size(halfW, imgH));
@@ -435,7 +385,6 @@ int main(int argc, char* argv[]) {
             if (origView.channels() == 1) cvtColor(origView, origView, COLOR_GRAY2BGR);
             origView.copyTo(canvas(Rect(IMG_X, IMG_Y, halfW, imgH)));
 
-            // Правая половина — результат
             Mat resultView = cachedDisplay.clone();
             if (resultView.cols != halfW || resultView.rows != imgH) {
                 resize(resultView, resultView, Size(halfW, imgH));
@@ -443,11 +392,9 @@ int main(int argc, char* argv[]) {
             if (resultView.channels() == 1) cvtColor(resultView, resultView, COLOR_GRAY2BGR);
             resultView.copyTo(canvas(Rect(IMG_X + halfW, IMG_Y, halfW, imgH)));
 
-            // Подписи
             cvui::text(canvas, IMG_X + 5, IMG_Y + 20, "BEFORE", 0.5, 0xffff00);
             cvui::text(canvas, IMG_X + halfW + 5, IMG_Y + 20, "AFTER", 0.5, 0x00ff00);
 
-            // Разделительная линия
             for (int y = IMG_Y; y < IMG_Y + imgH; y++) {
                 if (IMG_X + halfW < canvas.cols)
                     canvas.at<Vec3b>(y, IMG_X + halfW) = Vec3b(255, 255, 255);
@@ -456,7 +403,6 @@ int main(int argc, char* argv[]) {
             }
         }
         else {
-            // Обычный режим
             Mat img = cachedDisplay.clone();
             if (img.cols != imgW || img.rows != imgH) {
                 resize(img, img, Size(imgW, imgH));
@@ -465,7 +411,6 @@ int main(int argc, char* argv[]) {
             img.copyTo(canvas(Rect(IMG_X, IMG_Y, imgW, imgH)));
         }
 
-        // Уголок для ресайза
         for (int i = 0; i < 15; i++) {
             for (int j = 0; j < 15 - i; j++) {
                 int px = IMG_X + imgW - 15 + i;
@@ -540,6 +485,28 @@ int main(int argc, char* argv[]) {
         }
         py += 20;
 
+        // ---- ГИСТОГРАММЫ ----
+        cvui::text(canvas, px, py, "Histograms (B / G / R)", 0.4, 0xffffff);
+        py += 16;
+
+        static int histB[256], histG[256], histR[256];
+        static Mat hB, hG, hR;
+
+        if (histNeedRecalc) {
+            buildHistograms(cachedDisplay, histB, histG, histR);
+            hB = drawHistogram(histB, Scalar(255, 80, 80), 280, 50);
+            hG = drawHistogram(histG, Scalar(80, 255, 80), 280, 50);
+            hR = drawHistogram(histR, Scalar(80, 80, 255), 280, 50);
+            histNeedRecalc = false;
+        }
+
+        hB.copyTo(canvas(Rect(px, py, 280, 50)));
+        py += 53;
+        hG.copyTo(canvas(Rect(px, py, 280, 50)));
+        py += 53;
+        hR.copyTo(canvas(Rect(px, py, 280, 50)));
+        py += 58;
+
         // ---- РАЗМЕР ----
         cvui::text(canvas, px, py, "Image size (px)", 0.4, 0xffffff);
         py += 18;
@@ -579,12 +546,10 @@ int main(int argc, char* argv[]) {
         cvui::text(canvas, px, py, "Mode", 0.4, 0xffffff);
         py += 16;
 
-        if (cvui::button(canvas, px, py, 80, 20, "Original", 0.35)) { mode = 0; needRecalc = true; }
-        if (cvui::button(canvas, px + 85, py, 80, 20, "Gray", 0.35)) { mode = 1; needRecalc = true; }
-        if (cvui::button(canvas, px + 170, py, 80, 20, "Satur.", 0.35)) { mode = 2; needRecalc = true; }
-        py += 23;
-        if (cvui::button(canvas, px, py, 80, 20, "Hue", 0.35)) { mode = 3; needRecalc = true; }
-        if (cvui::button(canvas, px + 85, py, 80, 20, "ColorMap", 0.35)) { mode = 4; needRecalc = true; }
+        if (cvui::button(canvas, px, py, 120, 22, "Original", 0.4)) { mode = 0; needRecalc = true; }
+        if (cvui::button(canvas, px + 125, py, 120, 22, "Saturation", 0.4)) { mode = 1; needRecalc = true; }
+        py += 26;
+        if (cvui::button(canvas, px, py, 120, 22, "Hue", 0.4)) { mode = 2; needRecalc = true; }
         py += 28;
 
         // ---- МЕТОДЫ ----
@@ -592,44 +557,33 @@ int main(int argc, char* argv[]) {
         py += 16;
 
         unsigned int rcColor = applyReplace ? 0x006400 : 0x424242;
-        if (cvui::button(canvas, px, py, 120, 20, "Replace Color", 0.35, rcColor)) {
+        if (cvui::button(canvas, px, py, 120, 22, "Replace Color", 0.4, rcColor)) {
             applyReplace = !applyReplace;
             needRecalc = true;
         }
 
         unsigned int bcColor = applyBalance ? 0x006400 : 0x424242;
-        if (cvui::button(canvas, px + 125, py, 120, 20, "Balance Colors", 0.35, bcColor)) {
+        if (cvui::button(canvas, px + 125, py, 120, 22, "Balance Colors", 0.4, bcColor)) {
             applyBalance = !applyBalance;
             needRecalc = true;
         }
-        py += 28;
+        py += 30;
 
-        // ---- ТРЕКБАРЫ ----
-        cvui::text(canvas, px, py, "Adjustments", 0.4, 0xffffff);
-        py += 18;
-
-        int trackW = 130;
-
-        cvui::text(canvas, px, py, "Bright", 0.3, 0xcccccc);
-        cvui::text(canvas, px + 145, py, "Satur", 0.3, 0xcccccc);
-        py += 10;
-        if (cvui::trackbar(canvas, px, py, trackW, &brightness, 0, 200)) needRecalc = true;
-        if (cvui::trackbar(canvas, px + 145, py, trackW, &saturation, 0, 200)) needRecalc = true;
-        py += 42;
-
-        cvui::text(canvas, px, py, "Contr", 0.3, 0xcccccc);
-        cvui::text(canvas, px + 145, py, "Gamma", 0.3, 0xcccccc);
-        py += 10;
-        if (cvui::trackbar(canvas, px, py, trackW, &contrast, 0, 200)) needRecalc = true;
-        if (cvui::trackbar(canvas, px + 145, py, trackW, &gammaVal, 50, 200)) needRecalc = true;
-        py += 42;
-
+        // ---- ПАРАМЕТРЫ REPLACE ----
         if (applyReplace) {
-            cvui::text(canvas, px, py, "Target H", 0.3, 0xffff00);
-            cvui::text(canvas, px + 145, py, "New H", 0.3, 0x00ffff);
+            cvui::text(canvas, px, py, "Replace Color", 0.4, 0xffff00);
+            py += 16;
+
+            int trackW = 240;
+
+            cvui::text(canvas, px, py, "Target Hue (find)", 0.3, 0xffff00);
             py += 10;
             if (cvui::trackbar(canvas, px, py, trackW, &targetHue, 0, 360)) needRecalc = true;
-            if (cvui::trackbar(canvas, px + 145, py, trackW, &newHue, 0, 360)) needRecalc = true;
+            py += 42;
+
+            cvui::text(canvas, px, py, "New Hue (replace)", 0.3, 0x00ffff);
+            py += 10;
+            if (cvui::trackbar(canvas, px, py, trackW, &newHue, 0, 360)) needRecalc = true;
             py += 42;
         }
 
@@ -648,24 +602,16 @@ int main(int argc, char* argv[]) {
         }
 
         if (cvui::button(canvas, px + 85, py, 80, 25, "Reset", 0.4)) {
-            brightness = 100;
-            saturation = 100;
-            contrast = 100;
-            gammaVal = 100;
-
             applyReplace = false;
             applyBalance = false;
             splitView = false;
-
             targetHue = 0;
             newHue = 180;
             mode = 0;
-
             imgW = 500;
             imgH = 400;
             inputW = 500;
             inputH = 400;
-
             lastCopied = "";
             needRecalc = true;
         }
@@ -696,9 +642,8 @@ int main(int argc, char* argv[]) {
         cv::imshow(WINDOW_NAME, canvas);
 
         int key = cv::waitKey(20);
-        if (key == 27) break;  // ESC
+        if (key == 27) break;
 
-        // Проверка: закрыто ли окно пользователем
         if (cv::getWindowProperty(WINDOW_NAME, cv::WND_PROP_VISIBLE) < 1) {
             break;
         }
