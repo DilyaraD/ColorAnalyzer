@@ -5,6 +5,11 @@ VisualStudioVersion = 16.0.37507.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ColorAnalyzer", "ColorAnalyzer\ColorAnalyzer.vcxproj", "{7625F6D8-825A-40A5-9305-B40FBC895DB4}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{6F0B0408-3A6F-4A7D-B0B9-A914A7C61F88}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\Загрузки\cvui.h = ..\..\Загрузки\cvui.h
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
